@@ -1,7 +1,9 @@
 from datetime import date, timedelta
+from urllib.parse import urlparse
 
 import pytest
 
+import app as app_module
 from app import create_app
 from models import Book, Loan, User, db
 
@@ -252,6 +254,65 @@ def test_public_and_admin_pages_render(client, app):
     for path in ("/admin", "/admin/books", "/admin/students", "/admin/loans", "/admin/issue"):
         response = client.get(path)
         assert response.status_code == 200, path
+
+
+def test_password_reset_email_changes_password_and_token_is_one_time(client, app, monkeypatch):
+    sent_emails = []
+    monkeypatch.setattr(
+        app_module,
+        "send_password_reset_email",
+        lambda recipient, reset_url: sent_emails.append((recipient, reset_url)),
+    )
+    with app.app_context():
+        user = make_user("reset@example.edu")
+        original_hash = user.password_hash
+
+    response = client.post(
+        "/forgot-password",
+        data={"email": "RESET@example.edu"},
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert b"If an account exists" in response.data
+    assert sent_emails[0][0] == "reset@example.edu"
+    reset_path = urlparse(sent_emails[0][1]).path
+    reset_page = client.get(reset_path)
+    assert reset_page.status_code == 200
+    assert b"New password" in reset_page.data
+
+    changed = client.post(
+        reset_path,
+        data={"password": "new-password-456", "confirm_password": "new-password-456"},
+        follow_redirects=True,
+    )
+    assert changed.status_code == 200
+    assert b"password has been changed" in changed.data
+    with app.app_context():
+        user = User.query.filter_by(email="reset@example.edu").one()
+        assert user.password_hash != original_hash
+        assert user.check_password("new-password-456")
+
+    reused = client.get(reset_path, follow_redirects=True)
+    assert b"invalid or has expired" in reused.data
+
+
+def test_password_reset_request_does_not_disclose_unknown_emails(client, monkeypatch):
+    sent_emails = []
+    monkeypatch.setattr(
+        app_module,
+        "send_password_reset_email",
+        lambda recipient, reset_url: sent_emails.append((recipient, reset_url)),
+    )
+    response = client.post(
+        "/forgot-password",
+        data={"email": "missing@example.edu"},
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert b"If an account exists" in response.data
+    assert sent_emails == []
 
 
 def test_create_admin_cli_prompts_and_hashes_password(app):

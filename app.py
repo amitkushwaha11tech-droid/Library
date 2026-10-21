@@ -36,11 +36,11 @@ def create_app(test_config=None):
     db.init_app(app)
     login_manager.init_app(app)
     csrf.init_app(app)
-with app.app_context():
+ with app.app_context():
      db.create_all()
 
-    @app.context_processor
-    def inject_template_globals():
+ @app.context_processor
+ def inject_template_globals():
         return {"now": datetime.now(timezone.utc)}
 
     @login_manager.user_loader

@@ -17,7 +17,7 @@
   <header class="site-header">
     <div class="nav-wrap">
       <a class="brand" href="{{ url_for('index') }}" aria-label="Smart Library home">
-        <span class="brand-mark" aria-hidden="true">SL</span>
+        <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 40 40" focusable="false"><path d="M6.5 10.5c4.7-1.1 9.2.1 13.5 3.5v17c-4.3-3.4-8.8-4.6-13.5-3.5v-17Z"/><path d="M33.5 10.5C28.8 9.4 24.3 10.6 20 14v17c4.3-3.4 8.8-4.6 13.5-3.5v-17Z"/><path d="M10 15c2.5-.1 4.8.5 7 1.8M10 20c2.5-.1 4.8.5 7 1.8M30 15c-2.5-.1-4.8.5-7 1.8M30 20c-2.5-.1-4.8.5-7 1.8"/><path class="brand-spark" d="m29 4 1.4 3.1L34 8.5l-3.6 1.4L29 13l-1.4-3.1L24 8.5l3.6-1.4L29 4Z"/></svg></span>
         <span class="brand-copy"><strong>Smart Library</strong><small>Campus collection</small></span>
       </a>
       <button class="menu-toggle" type="button" aria-expanded="false" aria-controls="primary-nav" aria-label="Open navigation"><span></span><span></span></button>
@@ -51,7 +51,7 @@
   {% endwith %}
   <main id="main">{% block content %}{% endblock %}</main>
   <footer class="site-footer">
-    <div class="footer-inner"><a class="brand brand-footer" href="{{ url_for('index') }}"><span class="brand-mark" aria-hidden="true">SL</span><span class="brand-copy"><strong>Smart Library</strong><small>Learning, in good company.</small></span></a><p>Made for curious minds and the campus they share.</p><span class="footer-meta">© {{ now.year }} Campus Library</span></div>
+    <div class="footer-inner"><a class="brand brand-footer" href="{{ url_for('index') }}"><span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 40 40" focusable="false"><path d="M6.5 10.5c4.7-1.1 9.2.1 13.5 3.5v17c-4.3-3.4-8.8-4.6-13.5-3.5v-17Z"/><path d="M33.5 10.5C28.8 9.4 24.3 10.6 20 14v17c4.3-3.4 8.8-4.6 13.5-3.5v-17Z"/><path d="M10 15c2.5-.1 4.8.5 7 1.8M10 20c2.5-.1 4.8.5 7 1.8M30 15c-2.5-.1-4.8.5-7 1.8M30 20c-2.5-.1-4.8.5-7 1.8"/><path class="brand-spark" d="m29 4 1.4 3.1L34 8.5l-3.6 1.4L29 13l-1.4-3.1L24 8.5l3.6-1.4L29 4Z"/></svg></span><span class="brand-copy"><strong>Smart Library</strong><small>Learning, in good company.</small></span></a><p>Made for curious minds and the campus they share.</p><span class="footer-meta">© {{ now.year }} Campus Library</span></div>
   </footer>
 </body>
 </html>

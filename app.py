@@ -1,11 +1,13 @@
-from ast import With
+import hashlib
 import re
+import smtplib
 from datetime import date, datetime, timedelta, timezone
+from email.message import EmailMessage
 from functools import wraps
 from urllib.parse import urlparse
 
 import click
-from flask import Flask, abort, app, flash, redirect, render_template, request, url_for
+from flask import Flask, abort, current_app, flash, redirect, render_template, request, url_for
 from flask_login import (
     LoginManager,
     current_user,
@@ -14,6 +16,7 @@ from flask_login import (
     logout_user,
 )
 from flask_wtf.csrf import CSRFProtect
+from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from sqlalchemy import func, or_, update
 from sqlalchemy.exc import IntegrityError
 
@@ -28,6 +31,32 @@ login_manager.login_message_category = "info"
 csrf = CSRFProtect()
 
 
+def send_password_reset_email(recipient, reset_url):
+    config = current_app.config
+    sender = config.get("MAIL_DEFAULT_SENDER") or config.get("MAIL_USERNAME")
+    username = config.get("MAIL_USERNAME")
+    password = config.get("MAIL_PASSWORD")
+    if not sender or not username or not password:
+        raise RuntimeError("Email delivery is not configured")
+
+    message = EmailMessage()
+    message["Subject"] = "Reset your Smart Library password"
+    message["From"] = sender
+    message["To"] = recipient
+    message.set_content(
+        "We received a request to reset your Smart Library password.\n\n"
+        f"Use this link within {config['PASSWORD_RESET_TIMEOUT'] // 60} minutes:\n"
+        f"{reset_url}\n\n"
+        "If you did not request this, you can ignore this email."
+    )
+
+    with smtplib.SMTP(config["MAIL_SERVER"], config["MAIL_PORT"], timeout=20) as smtp:
+        if config["MAIL_USE_TLS"]:
+            smtp.starttls()
+        smtp.login(username, password)
+        smtp.send_message(message)
+
+
 def create_app(test_config=None):
     app = Flask(__name__, instance_relative_config=True)
     app.config.from_object(Config)
@@ -40,11 +69,9 @@ def create_app(test_config=None):
     with app.app_context():
         db.create_all()
 
-    return app
-
-@app.context_processor
-def inject_template_globals():
-    return {"now": datetime.now(timezone.utc)}
+    @app.context_processor
+    def inject_template_globals():
+        return {"now": datetime.now(timezone.utc)}
 
     @login_manager.user_loader
     def load_user(user_id):
@@ -167,6 +194,71 @@ def inject_template_globals():
                 return redirect(url_for("dashboard"))
             flash("Email or password was not recognized.", "error")
         return render_template("login.html")
+
+    @app.route("/forgot-password", methods=["GET", "POST"])
+    def forgot_password():
+        if request.method == "POST":
+            email = request.form.get("email", "").strip().lower()
+            user = User.query.filter_by(email=email).first()
+            if user:
+                serializer = URLSafeTimedSerializer(app.config["SECRET_KEY"])
+                token = serializer.dumps(
+                    {
+                        "user_id": user.id,
+                        "password_hash_digest": hashlib.sha256(
+                            user.password_hash.encode("utf-8")
+                        ).hexdigest(),
+                    },
+                    salt="password-reset",
+                )
+                reset_url = url_for("reset_password", token=token, _external=True)
+                try:
+                    send_password_reset_email(user.email, reset_url)
+                except Exception:
+                    current_app.logger.exception("Could not send password reset email")
+            flash(
+                "If an account exists for that email, a password reset link has been sent.",
+                "info",
+            )
+            return redirect(url_for("forgot_password"))
+        return render_template("forgot_password.html")
+
+    @app.route("/reset-password/<token>", methods=["GET", "POST"])
+    def reset_password(token):
+        serializer = URLSafeTimedSerializer(app.config["SECRET_KEY"])
+        try:
+            payload = serializer.loads(
+                token,
+                salt="password-reset",
+                max_age=app.config["PASSWORD_RESET_TIMEOUT"],
+            )
+        except (BadSignature, SignatureExpired):
+            flash("This password reset link is invalid or has expired.", "error")
+            return redirect(url_for("forgot_password"))
+
+        user = db.session.get(User, payload.get("user_id"))
+        current_hash_digest = (
+            hashlib.sha256(user.password_hash.encode("utf-8")).hexdigest()
+            if user
+            else None
+        )
+        if not user or payload.get("password_hash_digest") != current_hash_digest:
+            flash("This password reset link is invalid or has expired.", "error")
+            return redirect(url_for("forgot_password"))
+
+        if request.method == "POST":
+            password = request.form.get("password", "")
+            confirm_password = request.form.get("confirm_password", "")
+            if len(password) < 8 or len(password) > 128:
+                flash("Password must be between 8 and 128 characters.", "error")
+            elif password != confirm_password:
+                flash("The passwords do not match.", "error")
+            else:
+                user.set_password(password)
+                db.session.commit()
+                flash("Your password has been changed. Sign in to continue.", "success")
+                return redirect(url_for("login"))
+        return render_template("reset_password.html")
 
     @app.post("/logout")
     @login_required

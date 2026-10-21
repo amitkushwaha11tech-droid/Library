@@ -1,0 +1,3 @@
+{% extends 'base.html' %}
+{% block title %}Page not found{% endblock %}
+{% block content %}<section class="error-page page-width"><p class="eyebrow"><span></span> Lost in the stacks</p><span class="error-code">404</span><h1>That page isn't on this shelf.</h1><p>The address may be incorrect, or the page may have moved.</p><a class="button button-dark" href="{{ url_for('index') }}">Back to the homepage <span aria-hidden="true">↗</span></a></section>{% endblock %}

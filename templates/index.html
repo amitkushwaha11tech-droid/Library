@@ -1,0 +1,36 @@
+{% extends 'base.html' %}
+{% block title %}A better way to find your next read{% endblock %}
+{% block content %}
+<section class="hero-section">
+  <div class="hero-photo" role="img" aria-label="Warm, sunlit shelves in a university library"></div>
+  <div class="hero-shade"></div>
+  <div class="hero-content page-width">
+    <p class="eyebrow eyebrow-light"><span></span> Your campus, in good books</p>
+    <h1>Make room for<br><em>one more idea.</em></h1>
+    <p class="hero-lede">A smarter campus library, built around the next thing you want to learn.</p>
+    <form class="search-form hero-search" action="{{ url_for('books') }}" method="get" role="search">
+      <label class="visually-hidden" for="hero-query">Search by title, author, ISBN, or subject</label>
+      <span class="search-symbol" aria-hidden="true">⌕</span>
+      <input id="hero-query" type="search" name="q" value="{{ query }}" placeholder="A title, an author, a subject…">
+      <button class="button button-accent" type="submit">Find a book <span aria-hidden="true">↗</span></button>
+    </form>
+    <p class="hero-note">Open to every student · Thoughtfully curated · Always growing</p>
+  </div>
+  <div class="hero-index">01 <span>/</span> DISCOVER</div>
+</section>
+<section class="catalog-section page-width">
+  <div class="section-heading"><div><p class="eyebrow"><span></span> A good place to start</p><h2>On the shelves</h2></div><a class="text-link" href="{{ url_for('books') }}">View full catalogue <span aria-hidden="true">↗</span></a></div>
+  {% if books %}
+  <div class="book-grid">
+    {% for book in books %}
+      <article class="book-card">
+        <div class="book-cover cover-{{ loop.index0 % 5 }}"><span class="cover-category">{{ book.category }}</span><span class="cover-title">{{ book.title }}</span><span class="cover-author">{{ book.author }}</span><span class="cover-seal" aria-hidden="true">SL</span></div>
+        <div class="book-card-meta"><div><h3>{{ book.title }}</h3><p>{{ book.author }}</p></div><span class="availability {% if book.available_copies == 0 %}unavailable{% endif %}">{{ book.available_copies }} available</span></div>
+      </article>
+    {% endfor %}
+  </div>
+  {% else %}<div class="empty-state"><span class="empty-mark" aria-hidden="true">⌕</span><h3>{% if query %}No books match that search{% else %}The shelves are being prepared{% endif %}</h3><p>{% if query %}Try another title, author, or subject.{% else %}Check back soon for the first additions to the catalogue.{% endif %}</p></div>{% endif %}
+</section>
+<section class="manifesto-section"><div class="manifesto-inner page-width"><div><p class="eyebrow eyebrow-light"><span></span> More than a book list</p><h2>Good systems<br>make space for<br><em>good thinking.</em></h2></div><div class="manifesto-copy"><p>Find a book, keep track of a loan, and spend less time wondering when it is due. Smart Library gives students and librarians one clear place to take care of the details.</p><a class="button button-outline-light" href="{{ url_for('register') }}">Get your library account <span aria-hidden="true">↗</span></a></div><div class="manifesto-number">02 <span>/</span> BELONG</div></div></section>
+<section class="features-section page-width"><div class="section-heading"><div><p class="eyebrow"><span></span> Designed for campus life</p><h2>Thoughtful by design</h2></div><p class="section-intro">Small details that make the library easier to use, for everyone.</p></div><div class="feature-grid"><article class="feature-item"><span class="feature-number">01</span><span class="feature-symbol" aria-hidden="true">⌕</span><h3>Find your next read</h3><p>Search across titles, authors, ISBNs, and subjects in one quick step.</p></article><article class="feature-item"><span class="feature-number">02</span><span class="feature-symbol" aria-hidden="true">↗</span><h3>Know where you stand</h3><p>See your current books, due dates, and borrowing history at a glance.</p></article><article class="feature-item"><span class="feature-number">03</span><span class="feature-symbol" aria-hidden="true">＋</span><h3>Keep the shelves moving</h3><p>Librarians can issue and return books while stock updates automatically.</p></article></div></section>
+{% endblock %}

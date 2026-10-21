@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f4f7f2">
+  <meta name="description" content="Smart Library, a thoughtful way to discover and manage your campus collection.">
+  <title>{% block title %}Smart Library{% endblock %} | Campus Library</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <script src="{{ url_for('static', filename='js/script.js') }}" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header">
+    <div class="nav-wrap">
+      <a class="brand" href="{{ url_for('index') }}" aria-label="Smart Library home">
+        <span class="brand-mark" aria-hidden="true">SL</span>
+        <span class="brand-copy"><strong>Smart Library</strong><small>Campus collection</small></span>
+      </a>
+      <button class="menu-toggle" type="button" aria-expanded="false" aria-controls="primary-nav" aria-label="Open navigation"><span></span><span></span></button>
+      <nav class="primary-nav" id="primary-nav" aria-label="Primary navigation">
+        <a href="{{ url_for('books') }}">Explore books</a>
+        {% if current_user.is_authenticated and current_user.role == 'admin' %}
+          <a href="{{ url_for('admin_dashboard') }}">Overview</a>
+          <a href="{{ url_for('students') }}">Students</a>
+          <a href="{{ url_for('loans') }}">Loans</a>
+        {% elif current_user.is_authenticated %}
+          <a href="{{ url_for('student_dashboard') }}">My account</a>
+        {% endif %}
+        <div class="nav-actions">
+          {% if current_user.is_authenticated %}
+            <span class="nav-user">{{ current_user.full_name }}</span>
+            <form action="{{ url_for('logout') }}" method="post" class="inline-form"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="button button-quiet button-small" type="submit">Sign out</button></form>
+          {% else %}
+            <a class="button button-quiet button-small" href="{{ url_for('login') }}">Sign in</a>
+            <a class="button button-dark button-small" href="{{ url_for('register') }}">Join the library <span aria-hidden="true">↗</span></a>
+          {% endif %}
+        </div>
+      </nav>
+    </div>
+  </header>
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      <div class="flash-stack" role="status" aria-live="polite">
+        {% for category, message in messages %}<div class="flash flash-{{ category }}"><span>{{ message }}</span><button type="button" class="flash-close" aria-label="Dismiss message">×</button></div>{% endfor %}
+      </div>
+    {% endif %}
+  {% endwith %}
+  <main id="main">{% block content %}{% endblock %}</main>
+  <footer class="site-footer">
+    <div class="footer-inner"><a class="brand brand-footer" href="{{ url_for('index') }}"><span class="brand-mark" aria-hidden="true">SL</span><span class="brand-copy"><strong>Smart Library</strong><small>Learning, in good company.</small></span></a><p>Made for curious minds and the campus they share.</p><span class="footer-meta">© {{ now.year }} Campus Library</span></div>
+  </footer>
+</body>
+</html>

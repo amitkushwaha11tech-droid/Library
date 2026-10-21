@@ -4,7 +4,7 @@ from functools import wraps
 from urllib.parse import urlparse
 
 import click
-from flask import Flask, abort, flash, redirect, render_template, request, url_for
+from flask import Flask, abort, app, flash, redirect, render_template, request, url_for
 from flask_login import (
     LoginManager,
     current_user,
@@ -36,9 +36,9 @@ def create_app(test_config=None):
     db.init_app(app)
     login_manager.init_app(app)
     csrf.init_app(app)
-    with app.app_context():
-    db.create_all()
-    
+with app.app_context():
+     db.create_all()
+
     @app.context_processor
     def inject_template_globals():
         return {"now": datetime.now(timezone.utc)}

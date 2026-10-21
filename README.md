@@ -60,6 +60,18 @@ A responsive campus library application built with Flask, Flask-SQLAlchemy, Flas
 
 8. Open the URL printed in the terminal (normally `http://127.0.0.1:5000`). The home page and catalogue are public. Use **Sign in** for the librarian or student account.
 
+## Configure password reset email
+
+Password reset links are sent through Gmail SMTP and expire after 30 minutes. Use a Gmail account with 2-Step Verification enabled, then create an **App Password** in Google Account security settings. Do not use your normal Gmail password or commit these values to source control. In PowerShell, set the sender credentials before starting the app:
+
+```powershell
+$env:MAIL_USERNAME = "your-address@gmail.com"
+$env:MAIL_PASSWORD = "your-16-character-app-password"
+$env:MAIL_DEFAULT_SENDER = $env:MAIL_USERNAME
+```
+
+The defaults use `smtp.gmail.com`, port `587`, and STARTTLS. Optional settings are `MAIL_SERVER`, `MAIL_PORT`, `MAIL_USE_TLS`, and `PASSWORD_RESET_TIMEOUT` (seconds). A stable `SECRET_KEY` is required so reset links remain valid while the server is running.
+
 In VS Code, select the `.venv` interpreter using **Python: Select Interpreter** if the editor does not detect it automatically. To stop the server, focus its terminal and press `Ctrl+C`.
 
 ## Run tests

@@ -138,6 +138,8 @@ def create_app(test_config=None):
                 errors.append("Enter a valid student ID (up to 40 characters).")
             if not valid_email(email) or len(email) > 254:
                 errors.append("Enter a valid email address.")
+            elif not email.endswith("@gmail.com"):
+                errors.append("Use a student Gmail ID ending in @gmail.com.")
             if len(department) > 100:
                 errors.append("Department must be 100 characters or fewer.")
             if len(password) < 8 or len(password) > 128:

@@ -60,7 +60,7 @@ def test_public_registration_cannot_create_admin(client, app):
             "full_name": "New Student",
             "student_id": "CST-1001",
             "department": "CST",
-            "email": "student@example.edu",
+            "email": "student@gmail.com",
             "password": "strong-password-1",
             "confirm_password": "strong-password-1",
             "role": "admin",
@@ -70,10 +70,27 @@ def test_public_registration_cannot_create_admin(client, app):
 
     assert response.status_code == 200
     with app.app_context():
-        student = User.query.filter_by(email="student@example.edu").one()
+        student = User.query.filter_by(email="student@gmail.com").one()
         assert student.role == "student"
         assert student.password_hash != "strong-password-1"
         assert student.check_password("strong-password-1")
+
+
+def test_student_registration_rejects_non_gmail_addresses(client):
+    response = client.post(
+        "/register",
+        data={
+            "full_name": "New Student",
+            "student_id": "CST-1002",
+            "department": "CST",
+            "email": "student@example.edu",
+            "password": "strong-password-1",
+            "confirm_password": "strong-password-1",
+        },
+    )
+
+    assert response.status_code == 200
+    assert b"Use a student Gmail ID ending in @gmail.com." in response.data
 
 
 def test_student_cannot_access_admin_routes_or_other_student_loans(client, app):

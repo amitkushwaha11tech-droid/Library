@@ -20,7 +20,7 @@
         <label for="full_name">Full name</label>
         <input id="full_name" name="full_name" type="text" autocomplete="name" maxlength="120" required value="{{ request.form.get('full_name', '') }}">
       </div>
-      <div class="field-row">
+      <div class="field-row field-row-mobile-two">
         <div class="field">
           <label for="student_id">Student ID</label>
           <input id="student_id" name="student_id" type="text" maxlength="40" required value="{{ request.form.get('student_id', '') }}">
@@ -35,7 +35,7 @@
         <input id="email" name="email" type="email" autocomplete="email" maxlength="254" required value="{{ request.form.get('email', '') }}" placeholder="student@gmail.com">
         <span class="field-hint">Use an @gmail.com address; password reset links go to this inbox.</span>
       </div>
-      <div class="field-row">
+      <div class="field-row field-row-mobile-two">
         <div class="field">
           <label for="password">Password</label>
           <input id="password" name="password" type="password" autocomplete="new-password" minlength="8" maxlength="128" required>

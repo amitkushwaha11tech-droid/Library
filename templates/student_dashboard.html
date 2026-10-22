@@ -1,9 +1,38 @@
 {% extends 'base.html' %}
 {% block title %}My library{% endblock %}
 {% block content %}
-<section class="dashboard-shell page-width"><div class="dashboard-heading"><div><p class="eyebrow"><span></span> Student space</p><h1>Good to have you,<br><em>{{ current_user.full_name.split(' ')[0] }}.</em></h1><p class="dashboard-subtitle">Your reading, right where you left it.</p></div><a class="button button-dark" href="{{ url_for('books') }}">Explore the catalogue <span aria-hidden="true">↗</span></a></div>
-  <div class="metric-grid metric-grid-student"><article class="metric-card metric-ink"><span class="metric-label">On loan</span><strong>{{ active_loans|length }}</strong><span class="metric-foot">currently checked out</span></article><article class="metric-card metric-sage"><span class="metric-label">Due soon</span><strong>{{ due_soon_count }}</strong><span class="metric-foot">due in the next three days</span></article><article class="metric-card metric-coral"><span class="metric-label">Reading history</span><strong>{{ loans|length }}</strong><span class="metric-foot">books borrowed so far</span></article></div>
-  <div class="table-section"><div class="section-heading section-heading-compact"><div><p class="eyebrow"><span></span> Your account</p><h2>Borrowing history</h2></div></div>
-  {% if loans %}<div class="table-wrap"><table><thead><tr><th>Book</th><th>Checked out</th><th>Due date</th><th>Returned</th><th>Status</th></tr></thead><tbody>{% for loan in loans %}<tr><td><strong>{{ loan.book_title }}</strong></td><td>{{ loan.issue_date.strftime('%d %b %Y') }}</td><td>{{ loan.due_date.strftime('%d %b %Y') }}</td><td>{{ loan.return_date.strftime('%d %b %Y') if loan.return_date else '—' }}</td><td>{% if loan.return_date %}<span class="status status-returned">Returned</span>{% elif loan.is_overdue %}<span class="status status-overdue">Overdue · Rs. {{ loan.fine_amount }}</span>{% else %}<span class="status status-active">On loan</span>{% endif %}</td></tr>{% endfor %}</tbody></table></div>{% else %}<div class="empty-state empty-state-inline"><span class="empty-mark" aria-hidden="true">↗</span><h3>Your reading list starts here</h3><p>Find a title in the catalogue and ask a librarian to issue it to you.</p><a class="text-link" href="{{ url_for('books') }}">Browse books <span aria-hidden="true">↗</span></a></div>{% endif %}</div>
+<section class="dashboard-shell page-width">
+  <div class="dashboard-heading">
+    <div>
+      <p class="eyebrow"><span></span> Student space</p>
+      <h1>Good to have you,<br><em>{{ current_user.full_name.split(' ')[0] }}.</em></h1>
+      <p class="dashboard-subtitle">Your reading, right where you left it.</p>
+    </div>
+    <a class="button button-dark" href="{{ url_for('books') }}">Explore the catalogue <span aria-hidden="true">&#8599;</span></a>
+  </div>
+  <div class="metric-grid metric-grid-student">
+    <article class="metric-card metric-ink"><span class="metric-label">On loan</span><strong>{{ active_loans|length }}</strong><span class="metric-foot">currently checked out</span></article>
+    <article class="metric-card metric-sage"><span class="metric-label">Due soon</span><strong>{{ due_soon_count }}</strong><span class="metric-foot">due in the next three days</span></article>
+    <article class="metric-card metric-coral"><span class="metric-label">Reading history</span><strong>{{ loans|length }}</strong><span class="metric-foot">books borrowed so far</span></article>
+  </div>
+  <div class="table-section">
+    <div class="section-heading section-heading-compact"><div><p class="eyebrow"><span></span> Your account</p><h2>Borrowing history</h2></div></div>
+    {% if loans %}
+      <div class="table-wrap"><table>
+        <thead><tr><th>Book</th><th>Checked out</th><th>Due date</th><th>Returned</th><th>Status</th></tr></thead>
+        <tbody>{% for loan in loans %}
+          <tr>
+            <td data-label="Book"><strong>{{ loan.book_title }}</strong></td>
+            <td data-label="Checked out">{{ loan.issue_date.strftime('%d %b %Y') }}</td>
+            <td data-label="Due date">{{ loan.due_date.strftime('%d %b %Y') }}</td>
+            <td data-label="Returned">{{ loan.return_date.strftime('%d %b %Y') if loan.return_date else '-' }}</td>
+            <td data-label="Status">{% if loan.return_date %}<span class="status status-returned">Returned</span>{% elif loan.is_overdue %}<span class="status status-overdue">Overdue - Rs. {{ loan.fine_amount }}</span>{% else %}<span class="status status-active">On loan</span>{% endif %}</td>
+          </tr>
+        {% endfor %}</tbody>
+      </table></div>
+    {% else %}
+      <div class="empty-state empty-state-inline"><span class="empty-mark" aria-hidden="true">&#8599;</span><h3>Your reading list starts here</h3><p>Find a title in the catalogue and ask a librarian to issue it to you.</p><a class="text-link" href="{{ url_for('books') }}">Browse books <span aria-hidden="true">&#8599;</span></a></div>
+    {% endif %}
+  </div>
 </section>
 {% endblock %}

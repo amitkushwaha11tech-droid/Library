@@ -62,7 +62,7 @@ A responsive campus library application built with Flask, Flask-SQLAlchemy, Flas
 
 ## Configure password reset email
 
-Password reset links are sent through Gmail SMTP and expire after 30 minutes. Use a Gmail account with 2-Step Verification enabled, then create an **App Password** in Google Account security settings. Do not use your normal Gmail password or commit these values to source control. In PowerShell, set the sender credentials before starting the app:
+Registration verification codes, password reset links, and loan reminders are sent through Gmail SMTP. Verification codes expire after 10 minutes. Use a Gmail account with 2-Step Verification enabled, then create an **App Password** in Google Account security settings. Do not use your normal Gmail password or commit these values to source control. Configure these user environment variables before starting the app:
 
 ```powershell
 $env:MAIL_USERNAME = "your-address@gmail.com"
@@ -71,6 +71,24 @@ $env:MAIL_DEFAULT_SENDER = $env:MAIL_USERNAME
 ```
 
 The defaults use `smtp.gmail.com`, port `587`, and STARTTLS. Optional settings are `MAIL_SERVER`, `MAIL_PORT`, `MAIL_USE_TLS`, and `PASSWORD_RESET_TIMEOUT` (seconds). A stable `SECRET_KEY` is required so reset links remain valid while the server is running.
+
+### Schedule due-date reminders on Windows
+
+The app sends one reminder email per student containing all eligible unreturned books. Reminders start three days before each due date, then continue daily while overdue; a book returned on time is not included. To send them automatically, create a daily task in **Task Scheduler**:
+
+1. Create a Basic Task and choose a **Daily** trigger and a time when the computer is on.
+2. Set **Program/script** to the project's `.venv\Scripts\python.exe`.
+3. Set **Add arguments** to `-m flask --app app send-due-reminders`.
+4. Set **Start in** to the project folder containing `app.py`.
+5. Ensure the Windows user running the task has the `MAIL_USERNAME`, `MAIL_PASSWORD`, and `MAIL_DEFAULT_SENDER` environment variables configured. In Task Scheduler, prevent a new instance from starting while a previous instance is running.
+
+You can run the same command manually from the project folder to send that day's reminders:
+
+```powershell
+.\.venv\Scripts\python.exe -m flask --app app send-due-reminders
+```
+
+The command records successful sends and will not resend the same loan reminder twice on the same date. Email delivery requires valid Gmail SMTP credentials and an internet connection.
 
 In VS Code, select the `.venv` interpreter using **Python: Select Interpreter** if the editor does not detect it automatically. To stop the server, focus its terminal and press `Ctrl+C`.
 
@@ -86,12 +104,15 @@ Tests use an in-memory SQLite database and disable CSRF only for the test client
 
 ## Main workflows
 
-- Students register with their name, unique student ID, email, and password; passwords are stored as Werkzeug hashes.
-- Students browse and search the public catalogue, sign in, and view only their own loan history and due dates.
+- Students register with their name, unique student ID in the `256CSE145041` format (3 digits, 3 letters, 6 digits), email, and password; passwords are stored as Werkzeug hashes.
+- Student registrations remain pending until the six-digit email verification code is confirmed.
+- Students browse and search the public catalogue, sign in, and view their account details plus their own loan history, issue dates, due dates, return dates, and due/overdue status.
 - Librarians add, edit, search, and delete catalogue entries. A book with an active loan cannot be deleted, and total stock cannot be reduced below the number of active loans.
-- Librarians issue an available copy to an active student. The default due date is 14 days after issue; issuing atomically reduces available stock.
-- Librarians record returns. A return is accepted once and restores one copy. The estimated late fine is Rs. 2 per day after the due date; the estimate is informational and is not a payment transaction.
+- Librarians issue an available copy to an active student. The default due date is 14 days after issue; issuing atomically reduces available stock. They can update an active loan's due date from the loan register, but not to a date before the issue date.
+- Librarians record returns. A return is accepted once and restores one copy. The estimated late fine is Rs. 10 per day after the due date; the estimate is informational and is not a payment transaction.
+- The librarian loan register summarizes estimated fines by student for currently overdue books; returned loans and payments are not included in that outstanding estimate.
 - Librarians can pause or reactivate student accounts and review all active, overdue, and returned loans.
+- The daily `send-due-reminders` command emails students about books due within three days and continues daily for overdue books until they are returned.
 
 ## Data and configuration
 

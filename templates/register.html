@@ -23,7 +23,8 @@
       <div class="field-row field-row-mobile-two">
         <div class="field">
           <label for="student_id">Student ID</label>
-          <input id="student_id" name="student_id" type="text" maxlength="40" required value="{{ request.form.get('student_id', '') }}">
+          <input id="student_id" name="student_id" type="text" maxlength="12" pattern="[0-9]{3}[A-Za-z]{3}[0-9]{6}" title="Use the format 256CSE145041" placeholder="256CSE145041" required value="{{ request.form.get('student_id', '') }}">
+          <span class="field-hint">Use your college ID format, for example 256CSE145041 (3 digits, 3 letters, 6 digits).</span>
         </div>
         <div class="field">
           <label for="department">Department <span class="optional">Optional</span></label>
@@ -33,7 +34,7 @@
       <div class="field">
         <label for="email">Student Gmail ID</label>
         <input id="email" name="email" type="email" autocomplete="email" maxlength="254" required value="{{ request.form.get('email', '') }}" placeholder="student@gmail.com">
-        <span class="field-hint">Use an @gmail.com address; password reset links go to this inbox.</span>
+        <span class="field-hint">Use your own @gmail.com address. A verification code will be sent to this inbox.</span>
       </div>
       <div class="field-row field-row-mobile-two">
         <div class="field">

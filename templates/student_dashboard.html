@@ -10,23 +10,28 @@
     </div>
     <a class="button button-dark" href="{{ url_for('books') }}">Explore the catalogue <span aria-hidden="true">&#8599;</span></a>
   </div>
+  <section class="student-account-card" aria-label="My account details">
+    <div><span class="metric-label">Student ID</span><strong>{{ current_user.student_id or 'Not provided' }}</strong></div>
+    <div><span class="metric-label">Email</span><strong>{{ current_user.email }}</strong></div>
+    <div><span class="metric-label">Department</span><strong>{{ current_user.department or 'Not provided' }}</strong></div>
+  </section>
   <div class="metric-grid metric-grid-student">
     <article class="metric-card metric-ink"><span class="metric-label">On loan</span><strong>{{ active_loans|length }}</strong><span class="metric-foot">currently checked out</span></article>
     <article class="metric-card metric-sage"><span class="metric-label">Due soon</span><strong>{{ due_soon_count }}</strong><span class="metric-foot">due in the next three days</span></article>
     <article class="metric-card metric-coral"><span class="metric-label">Reading history</span><strong>{{ loans|length }}</strong><span class="metric-foot">books borrowed so far</span></article>
   </div>
   <div class="table-section">
-    <div class="section-heading section-heading-compact"><div><p class="eyebrow"><span></span> Your account</p><h2>Borrowing history</h2></div></div>
+    <div class="section-heading section-heading-compact"><div><p class="eyebrow"><span></span> My account</p><h2>My borrowed books</h2><p class="dashboard-subtitle">See when each book was issued, its due date, and whether it has been returned.</p></div></div>
     {% if loans %}
       <div class="table-wrap"><table>
-        <thead><tr><th>Book</th><th>Checked out</th><th>Due date</th><th>Returned</th><th>Status</th></tr></thead>
+        <thead><tr><th>Book</th><th>Issued on</th><th>Due date</th><th>Returned on</th><th>Status</th></tr></thead>
         <tbody>{% for loan in loans %}
           <tr>
             <td data-label="Book"><strong>{{ loan.book_title }}</strong></td>
-            <td data-label="Checked out">{{ loan.issue_date.strftime('%d %b %Y') }}</td>
+            <td data-label="Issued on">{{ loan.issue_date.strftime('%d %b %Y') }}</td>
             <td data-label="Due date">{{ loan.due_date.strftime('%d %b %Y') }}</td>
-            <td data-label="Returned">{{ loan.return_date.strftime('%d %b %Y') if loan.return_date else '-' }}</td>
-            <td data-label="Status">{% if loan.return_date %}<span class="status status-returned">Returned</span>{% elif loan.is_overdue %}<span class="status status-overdue">Overdue - Rs. {{ loan.fine_amount }}</span>{% else %}<span class="status status-active">On loan</span>{% endif %}</td>
+            <td data-label="Returned on">{{ loan.return_date.strftime('%d %b %Y') if loan.return_date else '-' }}</td>
+            <td data-label="Status">{% if loan.return_date %}<span class="status status-returned">Returned</span>{% elif loan.due_date < today %}<span class="status status-overdue">Overdue {{ (today - loan.due_date).days }} days · Rs. {{ loan.fine_amount }} estimated</span>{% elif loan.due_date == today %}<span class="status status-active">Due today</span>{% else %}<span class="status status-active">Due in {{ (loan.due_date - today).days }} days</span>{% endif %}</td>
           </tr>
         {% endfor %}</tbody>
       </table></div>

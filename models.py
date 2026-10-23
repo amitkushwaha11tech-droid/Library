@@ -2,7 +2,7 @@ from datetime import date, datetime, timezone
 
 from flask_login import UserMixin
 from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy import CheckConstraint
+from sqlalchemy import CheckConstraint, UniqueConstraint
 from werkzeug.security import check_password_hash, generate_password_hash
 
 
@@ -34,6 +34,21 @@ class User(UserMixin, db.Model):
 
     def check_password(self, password):
         return check_password_hash(self.password_hash, password)
+
+
+class PendingRegistration(db.Model):
+    __tablename__ = "pending_registrations"
+
+    id = db.Column(db.Integer, primary_key=True)
+    full_name = db.Column(db.String(120), nullable=False)
+    email = db.Column(db.String(254), unique=True, nullable=False, index=True)
+    student_id = db.Column(db.String(40), unique=True, nullable=False, index=True)
+    department = db.Column(db.String(100), nullable=True)
+    password_hash = db.Column(db.String(256), nullable=False)
+    otp_digest = db.Column(db.String(64), nullable=False)
+    expires_at = db.Column(db.DateTime, nullable=False)
+    attempts = db.Column(db.Integer, nullable=False, default=0)
+    last_sent_at = db.Column(db.DateTime, nullable=False)
 
 
 class Book(db.Model):
@@ -83,4 +98,15 @@ class Loan(db.Model):
     def fine_amount(self):
         end_date = self.return_date or date.today()
         late_days = max((end_date - self.due_date).days, 0)
-        return late_days * 2
+        return late_days * 10
+
+
+class DueReminderLog(db.Model):
+    __tablename__ = "due_reminder_logs"
+    __table_args__ = (
+        UniqueConstraint("loan_id", "reminder_date", name="uq_due_reminder_loan_date"),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    loan_id = db.Column(db.Integer, db.ForeignKey("loans.id"), nullable=False, index=True)
+    reminder_date = db.Column(db.Date, nullable=False)

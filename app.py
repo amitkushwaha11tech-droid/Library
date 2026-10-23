@@ -1,5 +1,7 @@
 import hashlib
+import hmac
 import re
+import secrets
 import smtplib
 from datetime import date, datetime, timedelta, timezone
 from email.message import EmailMessage
@@ -7,7 +9,17 @@ from functools import wraps
 from urllib.parse import urlparse
 
 import click
-from flask import Flask, abort, current_app, flash, redirect, render_template, request, url_for
+from flask import (
+    Flask,
+    abort,
+    current_app,
+    flash,
+    redirect,
+    render_template,
+    request,
+    session,
+    url_for,
+)
 from flask_login import (
     LoginManager,
     current_user,
@@ -19,9 +31,10 @@ from flask_wtf.csrf import CSRFProtect
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from sqlalchemy import func, or_, update
 from sqlalchemy.exc import IntegrityError
+from werkzeug.security import generate_password_hash
 
 from config import Config
-from models import Book, Loan, User, db
+from models import Book, DueReminderLog, Loan, PendingRegistration, User, db
 
 
 login_manager = LoginManager()
@@ -32,6 +45,18 @@ csrf = CSRFProtect()
 
 
 def send_password_reset_email(recipient, reset_url):
+    send_email(
+        recipient,
+        "Reset your Smart Library password",
+        "We received a request to reset your Smart Library password.\n\n"
+        f"Use this link within "
+        f"{current_app.config['PASSWORD_RESET_TIMEOUT'] // 60} minutes:\n"
+        f"{reset_url}\n\n"
+        "If you did not request this, you can ignore this email.",
+    )
+
+
+def send_email(recipient, subject, body):
     config = current_app.config
     sender = config.get("MAIL_DEFAULT_SENDER") or config.get("MAIL_USERNAME")
     username = config.get("MAIL_USERNAME")
@@ -40,21 +65,20 @@ def send_password_reset_email(recipient, reset_url):
         raise RuntimeError("Email delivery is not configured")
 
     message = EmailMessage()
-    message["Subject"] = "Reset your Smart Library password"
+    message["Subject"] = subject
     message["From"] = sender
     message["To"] = recipient
-    message.set_content(
-        "We received a request to reset your Smart Library password.\n\n"
-        f"Use this link within {config['PASSWORD_RESET_TIMEOUT'] // 60} minutes:\n"
-        f"{reset_url}\n\n"
-        "If you did not request this, you can ignore this email."
-    )
+    message.set_content(body)
 
     with smtplib.SMTP(config["MAIL_SERVER"], config["MAIL_PORT"], timeout=20) as smtp:
         if config["MAIL_USE_TLS"]:
             smtp.starttls()
         smtp.login(username, password)
         smtp.send_message(message)
+
+
+def utc_now_naive():
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 def create_app(test_config=None):
@@ -89,6 +113,13 @@ def create_app(test_config=None):
 
     def valid_email(email):
         return bool(re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", email or ""))
+
+    def verification_digest(otp):
+        return hmac.new(
+            app.config["SECRET_KEY"].encode("utf-8"),
+            otp.encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
 
     def book_search(query):
         books = Book.query
@@ -126,7 +157,7 @@ def create_app(test_config=None):
             return redirect(url_for("dashboard"))
         if request.method == "POST":
             full_name = request.form.get("full_name", "").strip()
-            student_id = request.form.get("student_id", "").strip()
+            student_id = request.form.get("student_id", "").strip().upper()
             department = request.form.get("department", "").strip()
             email = request.form.get("email", "").strip().lower()
             password = request.form.get("password", "")
@@ -134,8 +165,8 @@ def create_app(test_config=None):
             errors = []
             if not full_name or len(full_name) > 120:
                 errors.append("Enter your name (up to 120 characters).")
-            if not student_id or len(student_id) > 40:
-                errors.append("Enter a valid student ID (up to 40 characters).")
+            if not re.fullmatch(r"[0-9]{3}[A-Z]{3}[0-9]{6}", student_id):
+                errors.append("Enter a student ID in the format 256CSE145041.")
             if not valid_email(email) or len(email) > 254:
                 errors.append("Enter a valid email address.")
             elif not email.endswith("@gmail.com"):
@@ -150,28 +181,168 @@ def create_app(test_config=None):
                 errors.append("An account with that email already exists.")
             if User.query.filter_by(student_id=student_id).first():
                 errors.append("That student ID is already registered.")
+            pending_email = PendingRegistration.query.filter_by(email=email).first()
+            pending_student_id = PendingRegistration.query.filter_by(
+                student_id=student_id
+            ).first()
+            if pending_student_id and pending_student_id.email != email:
+                errors.append("That student ID is already being verified.")
             if errors:
                 for error in errors:
                     flash(error, "error")
-            else:
-                user = User(
-                    full_name=full_name,
-                    student_id=student_id,
-                    department=department or None,
-                    email=email,
-                    role="student",
+            elif pending_email and (
+                utc_now_naive() - pending_email.last_sent_at
+            ).total_seconds() < app.config["EMAIL_VERIFICATION_RESEND_COOLDOWN"]:
+                session["pending_registration_email"] = email
+                remaining = int(
+                    app.config["EMAIL_VERIFICATION_RESEND_COOLDOWN"]
+                    - (utc_now_naive() - pending_email.last_sent_at).total_seconds()
                 )
-                user.set_password(password)
-                db.session.add(user)
+                flash(
+                    "A verification request already exists. Check your inbox or wait "
+                    f"{remaining} seconds before requesting another code.",
+                    "info",
+                )
+                return redirect(url_for("verify_email"))
+            else:
                 try:
+                    otp = f"{secrets.randbelow(1_000_000):06d}"
+                    now = utc_now_naive()
+                    pending = pending_email or PendingRegistration(email=email)
+                    pending.full_name = full_name
+                    pending.student_id = student_id
+                    pending.department = department or None
+                    pending.password_hash = generate_password_hash(password)
+                    pending.otp_digest = verification_digest(otp)
+                    pending.expires_at = now + timedelta(
+                        seconds=app.config["EMAIL_VERIFICATION_TIMEOUT"]
+                    )
+                    pending.attempts = 0
+                    pending.last_sent_at = now
+                    db.session.add(pending)
                     db.session.commit()
                 except IntegrityError:
                     db.session.rollback()
                     flash("That email or student ID is already registered.", "error")
                 else:
-                    flash("Your student account is ready. Sign in to continue.", "success")
-                    return redirect(url_for("login"))
+                    session["pending_registration_email"] = email
+                    try:
+                        send_email(
+                            email,
+                            "Your Smart Library verification code",
+                            f"Your email verification code is {otp}.\n\n"
+                            f"It expires in {app.config['EMAIL_VERIFICATION_TIMEOUT'] // 60} minutes. "
+                            "If you did not request this, you can ignore this email.",
+                        )
+                    except (RuntimeError, OSError, smtplib.SMTPException):
+                        current_app.logger.exception(
+                            "Could not send registration verification email"
+                        )
+                        flash(
+                            "We could not send the verification code. Check the email settings and try again.",
+                            "error",
+                        )
+                    else:
+                        flash("Enter the verification code sent to your email.", "info")
+                        return redirect(url_for("verify_email"))
         return render_template("register.html")
+
+    @app.route("/verify-email", methods=["GET", "POST"])
+    def verify_email():
+        email = session.get("pending_registration_email")
+        pending = PendingRegistration.query.filter_by(email=email).first() if email else None
+        if not pending:
+            session.pop("pending_registration_email", None)
+            flash("Start registration to request a new verification code.", "info")
+            return redirect(url_for("register"))
+
+        if request.method == "POST":
+            otp = request.form.get("otp", "").strip()
+            now = utc_now_naive()
+            if pending.expires_at <= now:
+                flash("That verification code expired. Request a new code.", "error")
+            elif pending.attempts >= 5:
+                flash("Too many incorrect attempts. Request a new code.", "error")
+            else:
+                pending.attempts += 1
+                if hmac.compare_digest(
+                    pending.otp_digest, verification_digest(otp)
+                ) and re.fullmatch(r"[0-9]{6}", otp):
+                    user = User(
+                        full_name=pending.full_name,
+                        student_id=pending.student_id,
+                        department=pending.department,
+                        email=pending.email,
+                        password_hash=pending.password_hash,
+                        role="student",
+                    )
+                    db.session.add(user)
+                    db.session.delete(pending)
+                    try:
+                        db.session.commit()
+                    except IntegrityError:
+                        db.session.rollback()
+                        flash(
+                            "That email or student ID is already registered. Sign in or contact the librarian.",
+                            "error",
+                        )
+                    else:
+                        session.pop("pending_registration_email", None)
+                        flash(
+                            "Your email is verified and student account is ready. Sign in to continue.",
+                            "success",
+                        )
+                        return redirect(url_for("login"))
+                else:
+                    db.session.commit()
+                    flash("That verification code is incorrect.", "error")
+
+        return render_template(
+            "verify_email.html",
+            email=pending.email,
+            expiry_minutes=app.config["EMAIL_VERIFICATION_TIMEOUT"] // 60,
+        )
+
+    @app.post("/verify-email/resend")
+    def resend_verification_email():
+        email = session.get("pending_registration_email")
+        pending = PendingRegistration.query.filter_by(email=email).first() if email else None
+        if not pending:
+            session.pop("pending_registration_email", None)
+            flash("Start registration to request a new verification code.", "info")
+            return redirect(url_for("register"))
+
+        now = utc_now_naive()
+        elapsed = (now - pending.last_sent_at).total_seconds()
+        cooldown = app.config["EMAIL_VERIFICATION_RESEND_COOLDOWN"]
+        if elapsed < cooldown:
+            flash(
+                f"Wait {int(cooldown - elapsed)} seconds before requesting another code.",
+                "error",
+            )
+            return redirect(url_for("verify_email"))
+
+        otp = f"{secrets.randbelow(1_000_000):06d}"
+        pending.otp_digest = verification_digest(otp)
+        pending.expires_at = now + timedelta(
+            seconds=app.config["EMAIL_VERIFICATION_TIMEOUT"]
+        )
+        pending.attempts = 0
+        pending.last_sent_at = now
+        db.session.commit()
+        try:
+            send_email(
+                email,
+                "Your Smart Library verification code",
+                f"Your email verification code is {otp}.\n\n"
+                f"It expires in {app.config['EMAIL_VERIFICATION_TIMEOUT'] // 60} minutes.",
+            )
+        except (RuntimeError, OSError, smtplib.SMTPException):
+            current_app.logger.exception("Could not resend registration verification email")
+            flash("We could not send the verification code. Check the email settings.", "error")
+        else:
+            flash("A new verification code was sent to your email.", "success")
+        return redirect(url_for("verify_email"))
 
     @app.route("/login", methods=["GET", "POST"])
     def login():
@@ -294,6 +465,7 @@ def create_app(test_config=None):
             loans=loans,
             active_loans=active_loans,
             due_soon_count=due_soon_count,
+            today=date.today(),
         )
 
     @app.get("/admin")
@@ -542,7 +714,48 @@ def create_app(test_config=None):
                 Loan.return_date.is_(None), Loan.due_date < date.today()
             )
         loan_list = loan_query.order_by(Loan.return_date.is_(None).desc(), Loan.due_date.asc()).all()
-        return render_template("loans.html", loans=loan_list, status=status)
+        fine_totals = {}
+        overdue_loans = Loan.query.filter(
+            Loan.return_date.is_(None), Loan.due_date < date.today()
+        ).all()
+        for loan in overdue_loans:
+            summary = fine_totals.setdefault(
+                loan.user_id, {"student": loan.user, "amount": 0}
+            )
+            summary["amount"] += loan.fine_amount
+        fine_summaries = sorted(
+            fine_totals.values(),
+            key=lambda summary: summary["student"].full_name.casefold(),
+        )
+        return render_template(
+            "loans.html",
+            loans=loan_list,
+            status=status,
+            fine_summaries=fine_summaries,
+        )
+
+    @app.post("/admin/loans/<int:loan_id>/due-date")
+    @admin_required
+    def update_loan_due_date(loan_id):
+        loan = db.get_or_404(Loan, loan_id)
+        if loan.return_date is not None:
+            flash("A returned loan's due date cannot be changed.", "error")
+            return redirect(url_for("loans"))
+
+        try:
+            due_date = date.fromisoformat(request.form.get("due_date", "").strip())
+        except ValueError:
+            flash("Enter a valid due date.", "error")
+            return redirect(url_for("loans"))
+
+        if due_date < loan.issue_date:
+            flash("Due date cannot be before the issue date.", "error")
+            return redirect(url_for("loans"))
+
+        loan.due_date = due_date
+        db.session.commit()
+        flash(f"Due date updated to {due_date.strftime('%d %b %Y')}.", "success")
+        return redirect(url_for("loans"))
 
     @app.post("/admin/loans/<int:loan_id>/return")
     @admin_required
@@ -607,6 +820,76 @@ def create_app(test_config=None):
         db.session.add(admin)
         db.session.commit()
         click.echo(f"Administrator account created for {email}.")
+
+    @app.cli.command("send-due-reminders")
+    def send_due_reminders_command():
+        """Email students with books due within three days or already overdue."""
+        today = date.today()
+        reminder_window_end = today + timedelta(days=3)
+        loans = Loan.query.filter(
+            Loan.return_date.is_(None),
+            Loan.due_date <= reminder_window_end,
+        ).order_by(Loan.user_id, Loan.due_date, Loan.id).all()
+        already_sent = {
+            reminder.loan_id
+            for reminder in DueReminderLog.query.filter_by(reminder_date=today).all()
+        }
+        due_for_reminder = [
+            loan for loan in loans if loan.id not in already_sent
+        ]
+        loans_by_student = {}
+        for loan in due_for_reminder:
+            loans_by_student.setdefault(loan.user, []).append(loan)
+
+        sent_count = 0
+        failures = []
+        for student, student_loans in loans_by_student.items():
+            lines = [
+                f"Hello {student.full_name},",
+                "",
+                "Here is your Smart Library due-date reminder:",
+                "",
+            ]
+            for loan in student_loans:
+                if loan.due_date < today:
+                    status = f"overdue by {(today - loan.due_date).days} day(s)"
+                elif loan.due_date == today:
+                    status = "due today"
+                else:
+                    status = f"due in {(loan.due_date - today).days} day(s)"
+                lines.append(
+                    f"- {loan.book_title}: due {loan.due_date.strftime('%d %b %Y')} ({status})"
+                )
+            lines.extend(
+                [
+                    "",
+                    "Please return or renew your books with the library.",
+                ]
+            )
+            try:
+                send_email(
+                    student.email,
+                    "Smart Library due-date reminder",
+                    "\n".join(lines),
+                )
+            except (RuntimeError, OSError, smtplib.SMTPException) as error:
+                current_app.logger.exception(
+                    "Could not send due-date reminder to %s", student.email
+                )
+                failures.append(student.email)
+            else:
+                db.session.add_all(
+                    DueReminderLog(loan_id=loan.id, reminder_date=today)
+                    for loan in student_loans
+                )
+                sent_count += 1
+
+        db.session.commit()
+        click.echo(f"Sent {sent_count} due-date reminder email(s).")
+        if failures:
+            raise click.ClickException(
+                "Reminder emails failed for: " + ", ".join(failures)
+            )
 
     return app
 

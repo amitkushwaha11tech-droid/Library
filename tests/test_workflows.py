@@ -5,7 +5,7 @@ import pytest
 
 import app as app_module
 from app import create_app
-from models import Book, Loan, User, db
+from models import Book, DueReminderLog, Loan, PendingRegistration, User, db
 
 
 @pytest.fixture
@@ -53,27 +53,47 @@ def sign_in(client, email):
     )
 
 
-def test_public_registration_cannot_create_admin(client, app):
+def test_public_registration_requires_email_otp_and_cannot_create_admin(
+    client, app, monkeypatch
+):
+    sent_emails = []
+    monkeypatch.setattr(
+        app_module, "send_email", lambda recipient, subject, body: sent_emails.append(
+            (recipient, subject, body)
+        )
+    )
+    monkeypatch.setattr(app_module.secrets, "randbelow", lambda _limit: 123456)
     response = client.post(
         "/register",
         data={
             "full_name": "New Student",
-            "student_id": "CST-1001",
+            "student_id": "256CSE145100",
             "department": "CST",
             "email": "student@gmail.com",
             "password": "strong-password-1",
             "confirm_password": "strong-password-1",
             "role": "admin",
         },
-        follow_redirects=True,
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/verify-email")
+    assert sent_emails[0][0] == "student@gmail.com"
+    assert "123456" in sent_emails[0][2]
+    with app.app_context():
+        assert User.query.filter_by(email="student@gmail.com").count() == 0
+        pending = PendingRegistration.query.filter_by(email="student@gmail.com").one()
+        assert pending.student_id == "256CSE145100"
+
+    verified = client.post("/verify-email", data={"otp": "123456"})
+    assert verified.status_code == 302
+    assert verified.headers["Location"].endswith("/login")
     with app.app_context():
         student = User.query.filter_by(email="student@gmail.com").one()
         assert student.role == "student"
         assert student.password_hash != "strong-password-1"
         assert student.check_password("strong-password-1")
+        assert PendingRegistration.query.count() == 0
 
 
 def test_student_registration_rejects_non_gmail_addresses(client):
@@ -81,7 +101,7 @@ def test_student_registration_rejects_non_gmail_addresses(client):
         "/register",
         data={
             "full_name": "New Student",
-            "student_id": "CST-1002",
+            "student_id": "256CSE145101",
             "department": "CST",
             "email": "student@example.edu",
             "password": "strong-password-1",
@@ -91,6 +111,121 @@ def test_student_registration_rejects_non_gmail_addresses(client):
 
     assert response.status_code == 200
     assert b"Use a student Gmail ID ending in @gmail.com." in response.data
+
+
+@pytest.mark.parametrize(
+    "student_id",
+    ["anything", "CST-123", "26CSE145", "256CSE14505", "256CSE1450410"],
+)
+def test_student_registration_rejects_invalid_student_id_format(client, student_id):
+    response = client.post(
+        "/register",
+        data={
+            "full_name": "New Student",
+            "student_id": student_id,
+            "department": "CST",
+            "email": "student@gmail.com",
+            "password": "strong-password-1",
+            "confirm_password": "strong-password-1",
+        },
+    )
+
+    assert response.status_code == 200
+    assert b"Enter a student ID in the format 256CSE145041." in response.data
+
+
+def test_student_registration_normalizes_student_id_to_uppercase(
+    client, app, monkeypatch
+):
+    monkeypatch.setattr(app_module, "send_email", lambda *_args: None)
+    monkeypatch.setattr(app_module.secrets, "randbelow", lambda _limit: 654321)
+    response = client.post(
+        "/register",
+        data={
+            "full_name": "New Student",
+            "student_id": "256cse145103",
+            "department": "CST",
+            "email": "student1003@gmail.com",
+            "password": "strong-password-1",
+            "confirm_password": "strong-password-1",
+        },
+    )
+
+    assert response.status_code == 302
+    verified = client.post("/verify-email", data={"otp": "654321"})
+    assert verified.status_code == 302
+    with app.app_context():
+        student = User.query.filter_by(email="student1003@gmail.com").one()
+        assert student.student_id == "256CSE145103"
+
+
+def test_registration_rejects_incorrect_email_otp(client, app, monkeypatch):
+    monkeypatch.setattr(app_module, "send_email", lambda *_args: None)
+    monkeypatch.setattr(app_module.secrets, "randbelow", lambda _limit: 123456)
+    client.post(
+        "/register",
+        data={
+            "full_name": "New Student",
+            "student_id": "256CSE145111",
+            "department": "CST",
+            "email": "student1011@gmail.com",
+            "password": "strong-password-1",
+            "confirm_password": "strong-password-1",
+        },
+    )
+
+    response = client.post(
+        "/verify-email", data={"otp": "000000"}, follow_redirects=True
+    )
+
+    assert response.status_code == 200
+    assert b"That verification code is incorrect." in response.data
+    with app.app_context():
+        assert User.query.filter_by(email="student1011@gmail.com").count() == 0
+
+
+def test_resubmitting_pending_registration_resends_otp_after_cooldown(
+    client, app, monkeypatch
+):
+    sent_emails = []
+    monkeypatch.setattr(
+        app_module,
+        "send_email",
+        lambda recipient, subject, body: sent_emails.append((recipient, subject, body)),
+    )
+    codes = iter((111111, 222222))
+    monkeypatch.setattr(app_module.secrets, "randbelow", lambda _limit: next(codes))
+    registration = {
+        "full_name": "Pending Student",
+        "student_id": "256CSE145112",
+        "department": "CST",
+        "email": "pending112@gmail.com",
+        "password": "strong-password-1",
+        "confirm_password": "strong-password-1",
+    }
+
+    first_response = client.post("/register", data=registration)
+    assert first_response.status_code == 302
+    assert len(sent_emails) == 1
+
+    with app.app_context():
+        pending = PendingRegistration.query.filter_by(
+            email="pending112@gmail.com"
+        ).one()
+        pending.last_sent_at -= timedelta(seconds=61)
+        db.session.commit()
+
+    retry_response = client.post("/register", data=registration)
+
+    assert retry_response.status_code == 302
+    assert retry_response.headers["Location"].endswith("/verify-email")
+    assert len(sent_emails) == 2
+    assert "222222" in sent_emails[1][2]
+    with app.app_context():
+        assert PendingRegistration.query.filter_by(
+            email="pending112@gmail.com"
+        ).count() == 1
+        assert User.query.filter_by(email="pending112@gmail.com").count() == 0
 
 
 def test_student_cannot_access_admin_routes_or_other_student_loans(client, app):
@@ -125,6 +260,50 @@ def test_student_cannot_access_admin_routes_or_other_student_loans(client, app):
     assert denied.status_code == 403
     assert dashboard.status_code == 200
     assert b"Private history title" not in dashboard.data
+
+
+def test_student_account_shows_own_book_dates_and_due_status(client, app):
+    with app.app_context():
+        student = make_user(
+            "account-reader@example.edu",
+            student_id="CST-1010",
+            name="Account Reader",
+        )
+        student.department = "Computer Science"
+        book = Book(
+            title="My Borrowed Book",
+            author="A. Writer",
+            category="Computing",
+            total_copies=1,
+            available_copies=0,
+        )
+        db.session.add(book)
+        db.session.flush()
+        loan = Loan(
+            user_id=student.id,
+            book_id=book.id,
+            book_title=book.title,
+            issue_date=date.today() - timedelta(days=5),
+            due_date=date.today() + timedelta(days=2),
+        )
+        db.session.add(loan)
+        db.session.commit()
+        student_email = student.email
+        issue_date_label = loan.issue_date.strftime("%d %b %Y")
+        due_date_label = loan.due_date.strftime("%d %b %Y")
+
+    sign_in(client, student_email)
+    response = client.get("/student/dashboard")
+
+    assert response.status_code == 200
+    assert b"My account" in response.data
+    assert b"CST-1010" in response.data
+    assert b"account-reader@example.edu" in response.data
+    assert b"Computer Science" in response.data
+    assert b"My Borrowed Book" in response.data
+    assert issue_date_label.encode() in response.data
+    assert due_date_label.encode() in response.data
+    assert b"Due in 2 days" in response.data
 
 
 def test_admin_issue_and_return_updates_stock_once(client, app):
@@ -194,6 +373,55 @@ def test_non_admin_cannot_issue_even_with_direct_post(client, app):
     with app.app_context():
         assert db.session.get(Book, book_id).available_copies == 1
         assert Loan.query.count() == 0
+
+
+def test_admin_can_update_active_loan_due_date_and_cannot_set_it_before_issue(client, app):
+    with app.app_context():
+        admin = make_user("due-date-admin@example.edu", role="admin", name="Librarian")
+        student = make_user("due-date-reader@example.edu", student_id="CST-24")
+        book = Book(
+            title="Date Changes",
+            author="A. Writer",
+            category="Computing",
+            total_copies=1,
+            available_copies=0,
+        )
+        db.session.add(book)
+        db.session.flush()
+        loan = Loan(
+            user_id=student.id,
+            book_id=book.id,
+            book_title=book.title,
+            issue_date=date.today(),
+            due_date=date.today() + timedelta(days=14),
+        )
+        db.session.add(loan)
+        db.session.commit()
+        admin_email = admin.email
+        loan_id = loan.id
+        original_due_date = loan.due_date
+
+    sign_in(client, admin_email)
+    updated = client.post(
+        f"/admin/loans/{loan_id}/due-date",
+        data={"due_date": (date.today() + timedelta(days=21)).isoformat()},
+        follow_redirects=True,
+    )
+    assert updated.status_code == 200
+    with app.app_context():
+        loan = db.session.get(Loan, loan_id)
+        assert loan.due_date == date.today() + timedelta(days=21)
+
+    invalid = client.post(
+        f"/admin/loans/{loan_id}/due-date",
+        data={"due_date": (date.today() - timedelta(days=1)).isoformat()},
+        follow_redirects=True,
+    )
+    assert invalid.status_code == 200
+    assert b"Due date cannot be before the issue date." in invalid.data
+    with app.app_context():
+        assert db.session.get(Loan, loan_id).due_date == date.today() + timedelta(days=21)
+        assert original_due_date < db.session.get(Loan, loan_id).due_date
 
 
 def test_admin_can_manage_catalogue_and_cannot_delete_active_loan(client, app):
@@ -271,6 +499,151 @@ def test_public_and_admin_pages_render(client, app):
     for path in ("/admin", "/admin/books", "/admin/students", "/admin/loans", "/admin/issue"):
         response = client.get(path)
         assert response.status_code == 200, path
+
+
+def test_admin_loan_register_shows_overdue_fine_totals_by_student(client, app):
+    with app.app_context():
+        admin = make_user("fine-admin@example.edu", role="admin", name="Librarian")
+        student = make_user(
+            "sagar@example.edu", student_id="CST-88", name="Sagar Mishra"
+        )
+        other_student = make_user(
+            "other-fine@example.edu", student_id="CST-89", name="Other Student"
+        )
+        first_book = Book(
+            title="First overdue book",
+            author="Author",
+            category="Computing",
+            total_copies=1,
+            available_copies=0,
+        )
+        second_book = Book(
+            title="Second overdue book",
+            author="Author",
+            category="Computing",
+            total_copies=1,
+            available_copies=0,
+        )
+        returned_book = Book(
+            title="Returned overdue book",
+            author="Author",
+            category="Computing",
+            total_copies=1,
+            available_copies=1,
+        )
+        db.session.add_all([first_book, second_book, returned_book])
+        db.session.flush()
+        today = date.today()
+        db.session.add_all(
+            [
+                Loan(
+                    user_id=student.id,
+                    book_id=first_book.id,
+                    book_title=first_book.title,
+                    issue_date=today - timedelta(days=10),
+                    due_date=today - timedelta(days=3),
+                ),
+                Loan(
+                    user_id=student.id,
+                    book_id=second_book.id,
+                    book_title=second_book.title,
+                    issue_date=today - timedelta(days=10),
+                    due_date=today - timedelta(days=1),
+                ),
+                Loan(
+                    user_id=student.id,
+                    book_id=returned_book.id,
+                    book_title=returned_book.title,
+                    issue_date=today - timedelta(days=10),
+                    due_date=today - timedelta(days=4),
+                    return_date=today - timedelta(days=1),
+                ),
+                Loan(
+                    user_id=other_student.id,
+                    book_id=None,
+                    book_title="Not overdue",
+                    issue_date=today - timedelta(days=1),
+                    due_date=today + timedelta(days=13),
+                ),
+            ]
+        )
+        db.session.commit()
+        admin_email = admin.email
+
+    sign_in(client, admin_email)
+    response = client.get("/admin/loans")
+
+    assert response.status_code == 200
+    assert b"Sagar Mishra" in response.data
+    assert b"Rs. 40 estimated" in response.data
+    assert response.data.count(b"Other Student") == 1
+    assert b"payments are not recorded here" in response.data
+
+
+def test_due_reminder_command_emails_due_soon_and_overdue_once_per_day(
+    app, monkeypatch
+):
+    sent_emails = []
+    monkeypatch.setattr(
+        app_module,
+        "send_email",
+        lambda recipient, subject, body: sent_emails.append(
+            (recipient, subject, body)
+        ),
+    )
+    with app.app_context():
+        student = make_user(
+            "reminder-reader@example.edu",
+            student_id="CST-1020",
+            name="Reminder Reader",
+        )
+        today = date.today()
+        loans = [
+            Loan(
+                user_id=student.id,
+                book_title="Due soon book",
+                issue_date=today - timedelta(days=11),
+                due_date=today + timedelta(days=3),
+            ),
+            Loan(
+                user_id=student.id,
+                book_title="Overdue book",
+                issue_date=today - timedelta(days=20),
+                due_date=today - timedelta(days=2),
+            ),
+            Loan(
+                user_id=student.id,
+                book_title="Outside reminder window",
+                issue_date=today - timedelta(days=10),
+                due_date=today + timedelta(days=4),
+            ),
+            Loan(
+                user_id=student.id,
+                book_title="Returned book",
+                issue_date=today - timedelta(days=20),
+                due_date=today - timedelta(days=5),
+                return_date=today - timedelta(days=1),
+            ),
+        ]
+        db.session.add_all(loans)
+        db.session.commit()
+
+    runner = app.test_cli_runner()
+    first_run = runner.invoke(args=["send-due-reminders"])
+    second_run = runner.invoke(args=["send-due-reminders"])
+
+    assert first_run.exit_code == 0, first_run.output
+    assert "Sent 1 due-date reminder email(s)." in first_run.output
+    assert second_run.exit_code == 0, second_run.output
+    assert "Sent 0 due-date reminder email(s)." in second_run.output
+    assert len(sent_emails) == 1
+    assert sent_emails[0][0] == "reminder-reader@example.edu"
+    assert "Due soon book" in sent_emails[0][2]
+    assert "Overdue book" in sent_emails[0][2]
+    assert "Outside reminder window" not in sent_emails[0][2]
+    assert "Returned book" not in sent_emails[0][2]
+    with app.app_context():
+        assert DueReminderLog.query.count() == 2
 
 
 def test_password_reset_email_changes_password_and_token_is_one_time(client, app, monkeypatch):
